@@ -142,6 +142,7 @@ svg{display:block}
   to{stroke-dashoffset:0}
 }
 .branch-new{stroke-dasharray:300;animation:branchGrow 0.8s ease-out forwards}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
 /* ══════════════════════════════
    WORKOUT TAB
@@ -638,109 +639,242 @@ function qBezier(t, x0, y0, cx, cy, x1, y1) {
 function buildTreeSVG(width, height, animateNew) {
   const weeks = getAllWeeks();
   const W = width, H = height;
-  // Trunk from bottom center to top area
-  const trunkBaseX = W * 0.5;
-  const trunkBaseY = H * 0.95;
-  const trunkTopY  = H * 0.18;
+  const N = weeks.length;
 
-  let defs = `<defs>
-    <radialGradient id="sky" cx="50%" cy="20%" r="70%">
-      <stop offset="0%" stop-color="#1a1025" stop-opacity="1"/>
-      <stop offset="100%" stop-color="#0d0d0f" stop-opacity="1"/>
-    </radialGradient>
-  </defs>`;
+  // Seeded XOR-shift RNG for deterministic layout
+  let _s = 0xcafe1234;
+  const rng = () => { _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5; return (_s >>> 0) / 4294967296; };
+  const rr  = (a, b) => a + rng() * (b - a);
 
-  let bg = `<rect width="${W}" height="${H}" fill="url(#sky)"/>`;
+  const CX = W * 0.5, BASE_Y = H * 0.97;
 
-  // Trunk path — slightly organic
-  const trunkPath = `M ${trunkBaseX} ${trunkBaseY}
-    C ${trunkBaseX-4} ${lerp(trunkBaseY,trunkTopY,0.3)},
-      ${trunkBaseX+6} ${lerp(trunkBaseY,trunkTopY,0.6)},
-      ${trunkBaseX-2} ${trunkTopY}`;
-  let trunk = `<path d="${trunkPath}" stroke="${'#4a3728'}" stroke-width="${W*0.035}" fill="none" stroke-linecap="round"/>`;
-  trunk    += `<path d="${trunkPath}" stroke="${'#6b5040'}" stroke-width="${W*0.018}" fill="none" stroke-linecap="round" opacity="0.5"/>`;
+  // Trunk geometry — tapered, slightly leans left for organic feel
+  const trunkH    = H * Math.min(0.72, 0.30 + Math.max(N, 0) * 0.025);
+  const trunkTopX = CX - W * 0.012;
+  const trunkTopY = BASE_Y - trunkH;
+  const trunkBotW = W * 0.072;
+  const trunkTopW = W * 0.020;
 
-  // Branches
-  const MAX_BRANCHES = 14;
+  // ---- Helpers ----
+
+  // Tapered filled shape between two points with slight organic bulge
+  function taperedPath(x0, y0, x1, y1, w0, w1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const l = Math.sqrt(dx * dx + dy * dy);
+    if (l < 0.5) return '';
+    const nx = -dy / l, ny = dx / l;
+    const ax = x0 + nx * w0/2, ay = y0 + ny * w0/2;
+    const bx = x0 - nx * w0/2, by = y0 - ny * w0/2;
+    const cx = x1 + nx * w1/2, cy = y1 + ny * w1/2;
+    const dx2 = x1 - nx * w1/2, dy2 = y1 - ny * w1/2;
+    const midX = (x0+x1)/2, midY = (y0+y1)/2;
+    const bulge = l * 0.04;
+    return `M ${ax.toFixed(1)} ${ay.toFixed(1)} Q ${(midX+nx*bulge).toFixed(1)} ${(midY+ny*bulge).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)} L ${dx2.toFixed(1)} ${dy2.toFixed(1)} Q ${(midX-nx*bulge).toFixed(1)} ${(midY-ny*bulge).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)} Z`;
+  }
+
+  // Linear interpolation between two points
+  const along = (x0, y0, x1, y1, t) => ({ x: x0+(x1-x0)*t, y: y0+(y1-y0)*t });
+
+  // 5-petal cherry blossom flower
+  function blossomFlower(bx, by, r, col, isNew) {
+    const petalCols = ['#f4a0c0','#fce4ef','#e87aaa','#f0b8d0','#f4a0c0'];
+    let petals = '';
+    for (let p = 0; p < 5; p++) {
+      const a = (p / 5) * Math.PI * 2 - Math.PI / 2;
+      const px = bx + Math.cos(a) * r * 0.60;
+      const py = by + Math.sin(a) * r * 0.60;
+      petals += `<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(r*0.54).toFixed(1)}" ry="${(r*0.38).toFixed(1)}" fill="${petalCols[p]}" opacity="0.88" transform="rotate(${(a*180/Math.PI+90).toFixed(1)},${px.toFixed(1)},${py.toFixed(1)})"/>`;
+    }
+    petals += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*0.20).toFixed(1)}" fill="#ffe8f5" opacity="0.95"/>`;
+    petals += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*1.55).toFixed(1)}" fill="${col}" opacity="0.10"/>`;
+    const animStr = isNew
+      ? `style="transform-origin:${bx.toFixed(1)}px ${by.toFixed(1)}px;transform:scale(0);animation:bloomIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.5s both"`
+      : '';
+    return `<g ${animStr}>${petals}</g>`;
+  }
+
+  // ---- Trunk ----
+  // Build trunk as a filled tapered cubic-bezier shape
+  const lbx = CX - trunkBotW/2, lby = BASE_Y;
+  const ltx = trunkTopX - trunkTopW/2, lty = trunkTopY;
+  const lcp1x = lbx + W*0.010, lcp1y = BASE_Y - trunkH*0.32;
+  const lcp2x = ltx - W*0.012, lcp2y = trunkTopY + trunkH*0.26;
+  const rbx = CX + trunkBotW/2, rby = BASE_Y;
+  const rtx = trunkTopX + trunkTopW/2, rty = trunkTopY;
+  const rcp1x = rbx - W*0.006, rcp1y = BASE_Y - trunkH*0.38;
+  const rcp2x = rtx + W*0.014, rcp2y = trunkTopY + trunkH*0.20;
+
+  const trunkFillPath = `M ${lbx.toFixed(1)} ${lby.toFixed(1)} C ${lcp1x.toFixed(1)} ${lcp1y.toFixed(1)},${lcp2x.toFixed(1)} ${lcp2y.toFixed(1)},${ltx.toFixed(1)} ${lty.toFixed(1)} L ${rtx.toFixed(1)} ${rty.toFixed(1)} C ${rcp2x.toFixed(1)} ${rcp2y.toFixed(1)},${rcp1x.toFixed(1)} ${rcp1y.toFixed(1)},${rbx.toFixed(1)} ${rby.toFixed(1)} Z`;
+
+  // Lighter highlight stripe along trunk center
+  const hlbx = CX - trunkBotW*0.16, hltx = trunkTopX - trunkTopW*0.08;
+  const hrx  = CX + trunkBotW*0.16, hrtx = trunkTopX + trunkTopW*0.12;
+  const hlPath = `M ${hlbx.toFixed(1)} ${lby.toFixed(1)} C ${(hlbx+W*0.005).toFixed(1)} ${lcp1y.toFixed(1)},${(hltx-W*0.004).toFixed(1)} ${lcp2y.toFixed(1)},${hltx.toFixed(1)} ${lty.toFixed(1)} L ${hrtx.toFixed(1)} ${rty.toFixed(1)} C ${(hrtx+W*0.004).toFixed(1)} ${rcp2y.toFixed(1)},${(hrx-W*0.003).toFixed(1)} ${rcp1y.toFixed(1)},${hrx.toFixed(1)} ${rby.toFixed(1)} Z`;
+
+  // Bark texture lines
+  let barkLines = '';
+  _s = 0xcafe1234;
+  for (let k = 0; k < 8; k++) {
+    const t1 = rr(0.06, 0.48), t2 = Math.min(t1 + rr(0.10, 0.28), 0.92);
+    const y1 = BASE_Y - t1*trunkH, y2 = BASE_Y - t2*trunkH;
+    const bkW = trunkBotW*(1-t1) + trunkTopW*t1;
+    const x1 = CX + rr(-bkW*0.38, bkW*0.38);
+    const x2 = CX + rr(-bkW*0.25, bkW*0.25);
+    barkLines += `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${((x1+x2)/2+rr(-4,4)).toFixed(1)} ${((y1+y2)/2).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="#1e1208" stroke-width="${rr(0.6,1.4).toFixed(1)}" fill="none" opacity="${rr(0.28,0.52).toFixed(2)}"/>`;
+  }
+
+  // Root buttresses — flared curves at base
+  const rootFlareL = `M ${lbx.toFixed(1)} ${lby.toFixed(1)} Q ${(CX-trunkBotW*1.05).toFixed(1)} ${(BASE_Y-H*0.022).toFixed(1)} ${(CX-trunkBotW*1.55).toFixed(1)} ${BASE_Y.toFixed(1)}`;
+  const rootFlareR = `M ${rbx.toFixed(1)} ${rby.toFixed(1)} Q ${(CX+trunkBotW*1.05).toFixed(1)} ${(BASE_Y-H*0.022).toFixed(1)} ${(CX+trunkBotW*1.55).toFixed(1)} ${BASE_Y.toFixed(1)}`;
+  const rootW = (trunkBotW * 0.36).toFixed(1);
+
+  let trunkSVG = `<path d="${trunkFillPath}" fill="#3a2a1e"/>`;
+  trunkSVG += `<path d="${hlPath}" fill="#6b5040" opacity="0.26"/>`;
+  trunkSVG += barkLines;
+  trunkSVG += `<path d="${rootFlareL}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
+  trunkSVG += `<path d="${rootFlareR}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
+
+  // ---- Trunk centerline helper ----
+  // Returns { x, y } on the trunk center at height fraction t (0=base, 1=top)
+  function trunkPtAt(t) {
+    const mt = 1 - t;
+    const lx = mt*mt*mt*lbx + 3*mt*mt*t*lcp1x + 3*mt*t*t*lcp2x + t*t*t*ltx;
+    const rx = mt*mt*mt*rbx + 3*mt*mt*t*rcp1x + 3*mt*t*t*rcp2x + t*t*t*rtx;
+    return { x: (lx+rx)/2, y: BASE_Y - t*trunkH };
+  }
+
+  // ---- Branches ----
+  const MAX_BRANCHES = 12;
   const visibleWeeks = weeks.slice(-MAX_BRANCHES);
-  const N = visibleWeeks.length;
-
-  let branches = '';
-  let blossoms = '';
-
-  // Trunk Y range for branch attachments
-  const branchMinY = trunkTopY + (H * 0.05);
-  const branchMaxY = trunkBaseY - (H * 0.08);
-  const branchRange = branchMaxY - branchMinY;
+  const VN = visibleWeeks.length;
+  let branchSVG = '', blossomSVG = '';
 
   visibleWeeks.forEach((week, i) => {
-    // t = 0 = oldest visible, 1 = newest
-    const t = N <= 1 ? 0.5 : i / (N - 1);
-    // attach from bottom to top
-    const attachY = branchMaxY - t * branchRange;
-    // Trunk x drifts slightly
-    const attachX = trunkBaseX + Math.sin(i * 0.9 + 1) * W * 0.015;
+    _s = 0xdead0000 + i * 0x9a3f; // per-branch seed reset for consistent shape
 
-    const side = i % 2 === 0 ? 1 : -1; // right or left
-    const lengthFactor = 0.55 + 0.25 * Math.sin(i * 1.3 + 0.5); // organic length variation
-    const branchLen = W * 0.25 * lengthFactor;
-    const rise = H * 0.07 + (i % 4) * H * 0.012;
-    const droop = H * 0.02 * (i % 3);
+    const t = VN <= 1 ? 0.45 : i / (VN - 1);
+    const attachT = 0.06 + t * 0.74;
+    const ap = trunkPtAt(attachT);
+    const attachX = ap.x, attachY = ap.y;
 
-    const endX = attachX + side * branchLen;
-    const endY = attachY - rise;
-    const cpX  = attachX + side * branchLen * 0.55;
-    const cpY  = attachY - rise * 0.25 + droop;
+    const side = i % 2 === 0 ? 1 : -1;
+    const isDead = week.isMissed;
+    const isNew  = animateNew && i === VN - 1;
 
-    const isNew = animateNew && i === N - 1 && !week.isCurrentWeek && week.isComplete;
-    const strokeColor = week.isMissed ? '#2a2030' : '#4a3728';
-    const strokeW     = week.isMissed ? W * 0.012 : W * 0.018;
-    const animClass   = isNew ? ' class="branch-new"' : '';
-    const branchLen2  = Math.sqrt((endX-cpX)**2+(endY-cpY)**2) * 2;
+    // Branch angle: naturally upward and outward
+    const ang = side > 0
+      ? rr(30, 60) * Math.PI / 180
+      : rr(120, 150) * Math.PI / 180;
 
-    branches += `<path${animClass} d="M ${attachX} ${attachY} Q ${cpX} ${cpY} ${endX} ${endY}"
-      stroke="${strokeColor}" stroke-width="${strokeW}" fill="none" stroke-linecap="round"
-      ${isNew ? `stroke-dasharray="${branchLen2}" stroke-dashoffset="${branchLen2}" style="animation:branchGrow 0.8s ease-out 0.1s forwards"` : ''}/>`;
+    const mainLen = W * rr(0.20, 0.30);
+    const trunkW  = (trunkBotW*(1-attachT) + trunkTopW*attachT);
+    const mainW0  = trunkW * 0.68;
+    const mainW1  = mainW0 * 0.26;
 
-    // Small sub-branches for live branches
-    if (!week.isMissed && week.sessions > 0) {
-      const mid = qBezier(0.5, attachX, attachY, cpX, cpY, endX, endY);
-      const sub1EndX = mid.x + side * W * 0.08;
-      const sub1EndY = mid.y - H * 0.04;
-      branches += `<path d="M ${mid.x} ${mid.y} Q ${mid.x + side*W*0.04} ${mid.y - H*0.015} ${sub1EndX} ${sub1EndY}"
-        stroke="#4a3728" stroke-width="${W*0.01}" fill="none" stroke-linecap="round" opacity="0.7"/>`;
-    }
+    const mainEndX = attachX + Math.cos(ang) * mainLen;
+    const mainEndY = attachY - Math.sin(ang) * mainLen;
 
-    // Blossoms
-    const blossomColors = ['#f4a0c0','#e87aaa','#fce4ef','#f0b8d0'];
-    const tVals = [0.45, 0.65, 0.82, 0.97];
-    const count = week.sessions;
-    if (!week.isMissed && count > 0) {
-      for (let b = 0; b < count && b < 4; b++) {
-        const pt = qBezier(tVals[b], attachX, attachY, cpX, cpY, endX, endY);
-        const col = blossomColors[(i * 7 + b) % 4];
-        const r = W * 0.025 + (b % 2) * W * 0.005;
-        const isNewBlossom = animateNew && i === N - 1 && b === count - 1;
-        const animStyle = isNewBlossom
-          ? `style="transform-origin:${pt.x}px ${pt.y}px;animation:bloomIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.5s both"`
-          : '';
-        blossoms += `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="${r}" fill="${col}" opacity="0.92" ${animStyle}/>`;
-        // Petal ring
-        blossoms += `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="${(r*1.5).toFixed(1)}" fill="${col}" opacity="0.18"/>`;
+    const newWrap  = isNew ? `<g style="opacity:0;animation:fadeIn 0.7s ease-out 0.15s forwards">` : '';
+    const newClose = isNew ? `</g>` : '';
+
+    if (isDead) {
+      branchSVG += newWrap;
+      branchSVG += `<path d="M ${attachX.toFixed(1)} ${attachY.toFixed(1)} L ${mainEndX.toFixed(1)} ${mainEndY.toFixed(1)}" stroke="#2a2030" stroke-width="${(mainW0*0.52).toFixed(1)}" fill="none" stroke-linecap="round"/>`;
+      // One sparse sub-branch
+      const sp = along(attachX, attachY, mainEndX, mainEndY, 0.58);
+      const sa = ang + side * rr(18, 30) * Math.PI / 180;
+      const sl = mainLen * 0.48;
+      branchSVG += `<path d="M ${sp.x.toFixed(1)} ${sp.y.toFixed(1)} L ${(sp.x+Math.cos(sa)*sl).toFixed(1)} ${(sp.y-Math.sin(sa)*sl).toFixed(1)}" stroke="#2a2030" stroke-width="${(mainW0*0.28).toFixed(1)}" fill="none" stroke-linecap="round" opacity="0.7"/>`;
+      branchSVG += newClose;
+    } else {
+      branchSVG += newWrap;
+
+      // Main branch — filled tapered
+      branchSVG += `<path d="${taperedPath(attachX, attachY, mainEndX, mainEndY, mainW0, mainW1)}" fill="#4a3728"/>`;
+      // Inner highlight stripe
+      const inPt = along(attachX, attachY, mainEndX, mainEndY, 0.12);
+      branchSVG += `<path d="${taperedPath(inPt.x, inPt.y, mainEndX, mainEndY, mainW0*0.28, 0.5)}" fill="#6b5040" opacity="0.22"/>`;
+
+      // Split into 2 sub-branches near the end
+      const splitT = rr(0.55, 0.68);
+      const sp = along(attachX, attachY, mainEndX, mainEndY, splitT);
+      const subLen = mainLen * rr(0.46, 0.60);
+      const subW0  = mainW1 * 1.45, subW1 = subW0 * 0.24;
+
+      const subAng1 = ang + rr(20, 34) * Math.PI / 180 * side;
+      const subAng2 = ang - rr(16, 28) * Math.PI / 180 * side;
+      const s1ex = sp.x + Math.cos(subAng1)*subLen, s1ey = sp.y - Math.sin(subAng1)*subLen;
+      const s2ex = sp.x + Math.cos(subAng2)*subLen, s2ey = sp.y - Math.sin(subAng2)*subLen;
+
+      branchSVG += `<path d="${taperedPath(sp.x, sp.y, s1ex, s1ey, subW0, subW1)}" fill="#4a3728" opacity="0.90"/>`;
+      branchSVG += `<path d="${taperedPath(sp.x, sp.y, s2ex, s2ey, subW0, subW1)}" fill="#4a3728" opacity="0.90"/>`;
+
+      // Tertiary twigs at sub-branch tips
+      const terLen = subLen * rr(0.40, 0.55);
+      const terW   = Math.max(subW1 * 0.9, 1.0).toFixed(1);
+
+      const drawTwigs = (sx, sy, sa) => {
+        const t1a = sa + rr(20, 34)*Math.PI/180, t2a = sa - rr(18, 30)*Math.PI/180;
+        const t1ex = sx+Math.cos(t1a)*terLen, t1ey = sy-Math.sin(t1a)*terLen;
+        const t2ex = sx+Math.cos(t2a)*terLen, t2ey = sy-Math.sin(t2a)*terLen;
+        branchSVG += `<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t1ex.toFixed(1)}" y2="${t1ey.toFixed(1)}" stroke="#4a3728" stroke-width="${terW}" stroke-linecap="round" opacity="0.82"/>`;
+        branchSVG += `<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t2ex.toFixed(1)}" y2="${t2ey.toFixed(1)}" stroke="#4a3728" stroke-width="${terW}" stroke-linecap="round" opacity="0.82"/>`;
+        return [[t1ex, t1ey], [t2ex, t2ey]];
+      };
+
+      const ter1 = drawTwigs(s1ex, s1ey, subAng1);
+      const ter2 = drawTwigs(s2ex, s2ey, subAng2);
+
+      // Blossoms — 5-petal flowers clustered at twig tips
+      const blossomCols = ['#f4a0c0','#e87aaa','#fce4ef','#f0b8d0'];
+      const bCount = Math.min(week.sessions, 4);
+
+      if (bCount > 0) {
+        const centers = [
+          along(sp.x, sp.y, s1ex, s1ey, 0.86),
+          along(sp.x, sp.y, s2ex, s2ey, 0.86),
+          { x: ter1[0][0], y: ter1[0][1] },
+          { x: ter2[0][0], y: ter2[0][1] },
+        ];
+
+        const flowerR = W * 0.021;
+        for (let b = 0; b < bCount; b++) {
+          const center = centers[b % centers.length];
+          const clusterN = 2 + b; // more blossoms for more sessions
+          for (let c = 0; c < clusterN; c++) {
+            const ox = rr(-W*0.024, W*0.024);
+            const oy = rr(-H*0.018, H*0.018);
+            const col = blossomCols[Math.abs(i*5 + b*3 + c) % 4];
+            const fr  = flowerR * rr(0.72, 1.18);
+            const isNewBlossom = isNew && b === bCount-1 && c === 0;
+            blossomSVG += blossomFlower(center.x+ox, center.y+oy, fr, col, isNewBlossom);
+          }
+        }
       }
-    }
 
-    // Current week indicator (glowing dot at tip if in progress)
-    if (week.isCurrentWeek && week.sessions > 0 && !week.isComplete) {
-      const tip = qBezier(0.95, attachX, attachY, cpX, cpY, endX, endY);
-      blossoms += `<circle cx="${tip.x.toFixed(1)}" cy="${tip.y.toFixed(1)}" r="${W*0.018}" fill="var(--blossom2)" opacity="0.4">
-        <animate attributeName="r" values="${W*0.018};${W*0.030};${W*0.018}" dur="2s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.4;0.1;0.4" dur="2s" repeatCount="indefinite"/>
-      </circle>`;
+      // Pulsing dot for current in-progress week
+      if (week.isCurrentWeek && week.sessions > 0 && !week.isComplete) {
+        const ppt = along(sp.x, sp.y, s1ex, s1ey, 0.92);
+        const pr = W * 0.016;
+        blossomSVG += `<circle cx="${ppt.x.toFixed(1)}" cy="${ppt.y.toFixed(1)}" r="${pr.toFixed(1)}" fill="var(--blossom2)" opacity="0.5">
+          <animate attributeName="r" values="${pr};${pr*1.75};${pr}" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.5;0.1;0.5" dur="2s" repeatCount="indefinite"/>
+        </circle>`;
+      }
+
+      branchSVG += newClose;
     }
   });
 
-  // Bare trunk label when no history
+  // Defs & background
+  const defs = `<defs>
+    <radialGradient id="sky" cx="50%" cy="15%" r="80%">
+      <stop offset="0%" stop-color="#1a1025"/>
+      <stop offset="100%" stop-color="#0d0d0f"/>
+    </radialGradient>
+  </defs>`;
+  const bg = `<rect width="${W}" height="${H}" fill="url(#sky)"/>`;
+
   let emptyLabel = '';
   if (weeks.length === 0) {
     emptyLabel = `<text x="${W/2}" y="${H*0.65}" text-anchor="middle" fill="#3a3040"
@@ -748,7 +882,7 @@ function buildTreeSVG(width, height, animateNew) {
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="overflow:visible">
-    ${defs}${bg}${trunk}${branches}${blossoms}${emptyLabel}
+    ${defs}${bg}${trunkSVG}${branchSVG}${blossomSVG}${emptyLabel}
   </svg>`;
 }
 
