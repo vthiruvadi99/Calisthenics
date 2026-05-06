@@ -344,6 +344,68 @@ svg{display:block}
 /* scrollbar hiding */
 .hide-scrollbar::-webkit-scrollbar{display:none}
 .hide-scrollbar{scrollbar-width:none}
+
+/* ── calendar ── */
+.cal-grid{display:flex;flex-direction:column;gap:3px;margin-bottom:4px}
+.cal-week-row{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-day-label{
+  font-size:9px;font-family:'DM Mono',monospace;color:var(--muted);
+  text-align:center;padding-bottom:4px;letter-spacing:0.08em;
+}
+.cal-day{
+  aspect-ratio:1;border-radius:4px;display:flex;align-items:center;
+  justify-content:center;font-size:9px;font-family:'DM Mono',monospace;
+  font-weight:600;
+}
+.cal-day.empty{background:rgba(255,255,255,0.04)}
+.cal-day.future{background:none}
+.cal-day.done{background:rgba(244,160,192,0.18);color:var(--blossom1)}
+.cal-day.done-multi{background:rgba(232,122,170,0.28);color:#e87aaa}
+.cal-month-label{
+  font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);
+  letter-spacing:0.10em;margin:10px 0 5px;text-transform:uppercase;
+}
+
+/* ── reset button ── */
+.reset-zone{
+  margin-top:32px;padding:20px 0 8px;
+  border-top:1px solid rgba(255,255,255,0.05);text-align:center;
+}
+.reset-btn{
+  background:none;border:1px solid rgba(220,80,80,0.25);
+  color:rgba(220,80,80,0.55);padding:9px 22px;border-radius:8px;
+  font-family:'DM Sans',sans-serif;font-size:13px;cursor:pointer;
+  transition:all 0.2s;
+}
+.reset-btn:active{border-color:rgba(220,80,80,0.5);color:rgba(220,80,80,0.9)}
+
+/* ── cycle completion panel ── */
+.cycle-panel{
+  background:linear-gradient(135deg,rgba(157,141,245,0.08),rgba(244,160,192,0.08));
+  border:1px solid rgba(244,160,192,0.2);border-radius:14px;
+  padding:20px 16px;margin-top:16px;text-align:center;
+}
+.cycle-panel-title{
+  font-family:'Bebas Neue',sans-serif;font-size:22px;
+  color:var(--blossom1);margin-bottom:6px;
+}
+.cycle-panel-body{font-size:13px;color:var(--text);line-height:1.5;margin-bottom:14px}
+.cycle-panel-sub{font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:4px}
+.cycle-choice-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.cycle-choice-btn{
+  padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;
+  font-family:'DM Sans',sans-serif;cursor:pointer;border:1px solid;
+  transition:all 0.2s;min-height:44px;
+}
+.cycle-choice-btn.harder{
+  background:rgba(157,141,245,0.12);border-color:rgba(157,141,245,0.35);color:var(--pull);
+}
+.cycle-choice-btn.standard{
+  background:rgba(93,206,160,0.10);border-color:rgba(93,206,160,0.30);color:var(--legs);
+}
+.cycle-choice-btn.easier{
+  background:rgba(245,168,64,0.10);border-color:rgba(245,168,64,0.30);color:var(--push);
+}
 </style>
 </head>
 <body>
@@ -639,246 +701,226 @@ function qBezier(t, x0, y0, cx, cy, x1, y1) {
 function buildTreeSVG(width, height, animateNew) {
   const weeks = getAllWeeks();
   const W = width, H = height;
-  const N = weeks.length;
 
-  // Seeded XOR-shift RNG for deterministic layout
+  // Seeded XOR-shift RNG
   let _s = 0xcafe1234;
   const rng = () => { _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5; return (_s >>> 0) / 4294967296; };
   const rr  = (a, b) => a + rng() * (b - a);
 
-  const CX = W * 0.5, BASE_Y = H * 0.97;
+  const CX = W * 0.50, BASE_Y = H * 0.97;
 
-  // Trunk geometry — tapered, slightly leans left for organic feel
-  const trunkH    = H * Math.min(0.72, 0.30 + Math.max(N, 0) * 0.025);
-  const trunkTopX = CX - W * 0.012;
+  // Fixed trunk — always the same proportions regardless of progress
+  const trunkH    = H * 0.44;
+  const trunkTopX = CX - W * 0.018;
   const trunkTopY = BASE_Y - trunkH;
   const trunkBotW = W * 0.072;
-  const trunkTopW = W * 0.020;
+  const trunkTopW = W * 0.019;
 
   // ---- Helpers ----
-
-  // Tapered filled shape between two points with slight organic bulge
   function taperedPath(x0, y0, x1, y1, w0, w1) {
-    const dx = x1 - x0, dy = y1 - y0;
-    const l = Math.sqrt(dx * dx + dy * dy);
-    if (l < 0.5) return '';
-    const nx = -dy / l, ny = dx / l;
-    const ax = x0 + nx * w0/2, ay = y0 + ny * w0/2;
-    const bx = x0 - nx * w0/2, by = y0 - ny * w0/2;
-    const cx = x1 + nx * w1/2, cy = y1 + ny * w1/2;
-    const dx2 = x1 - nx * w1/2, dy2 = y1 - ny * w1/2;
-    const midX = (x0+x1)/2, midY = (y0+y1)/2;
-    const bulge = l * 0.04;
+    const dx=x1-x0, dy=y1-y0, l=Math.sqrt(dx*dx+dy*dy);
+    if(l<0.5) return '';
+    const nx=-dy/l, ny=dx/l;
+    const ax=x0+nx*w0/2, ay=y0+ny*w0/2, bx=x0-nx*w0/2, by=y0-ny*w0/2;
+    const cx=x1+nx*w1/2, cy=y1+ny*w1/2, dx2=x1-nx*w1/2, dy2=y1-ny*w1/2;
+    const midX=(x0+x1)/2, midY=(y0+y1)/2, bulge=l*0.04;
     return `M ${ax.toFixed(1)} ${ay.toFixed(1)} Q ${(midX+nx*bulge).toFixed(1)} ${(midY+ny*bulge).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)} L ${dx2.toFixed(1)} ${dy2.toFixed(1)} Q ${(midX-nx*bulge).toFixed(1)} ${(midY-ny*bulge).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)} Z`;
   }
 
-  // Linear interpolation between two points
-  const along = (x0, y0, x1, y1, t) => ({ x: x0+(x1-x0)*t, y: y0+(y1-y0)*t });
+  const along = (x0,y0,x1,y1,t) => ({x:x0+(x1-x0)*t, y:y0+(y1-y0)*t});
 
-  // 5-petal cherry blossom flower
   function blossomFlower(bx, by, r, col, isNew) {
-    const petalCols = ['#f4a0c0','#fce4ef','#e87aaa','#f0b8d0','#f4a0c0'];
-    let petals = '';
-    for (let p = 0; p < 5; p++) {
-      const a = (p / 5) * Math.PI * 2 - Math.PI / 2;
-      const px = bx + Math.cos(a) * r * 0.60;
-      const py = by + Math.sin(a) * r * 0.60;
-      petals += `<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(r*0.54).toFixed(1)}" ry="${(r*0.38).toFixed(1)}" fill="${petalCols[p]}" opacity="0.88" transform="rotate(${(a*180/Math.PI+90).toFixed(1)},${px.toFixed(1)},${py.toFixed(1)})"/>`;
+    const cols=['#f4a0c0','#fce4ef','#e87aaa','#f0b8d0','#f9c8de'];
+    let p='';
+    for(let i=0;i<5;i++){
+      const a=(i/5)*Math.PI*2-Math.PI/2;
+      const px=bx+Math.cos(a)*r*0.60, py=by+Math.sin(a)*r*0.60;
+      p+=`<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(r*0.54).toFixed(1)}" ry="${(r*0.38).toFixed(1)}" fill="${cols[i]}" opacity="0.87" transform="rotate(${(a*180/Math.PI+90).toFixed(1)},${px.toFixed(1)},${py.toFixed(1)})"/>`;
     }
-    petals += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*0.20).toFixed(1)}" fill="#ffe8f5" opacity="0.95"/>`;
-    petals += `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*1.55).toFixed(1)}" fill="${col}" opacity="0.10"/>`;
-    const animStr = isNew
-      ? `style="transform-origin:${bx.toFixed(1)}px ${by.toFixed(1)}px;transform:scale(0);animation:bloomIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.5s both"`
-      : '';
-    return `<g ${animStr}>${petals}</g>`;
+    p+=`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*0.20).toFixed(1)}" fill="#ffe8f5" opacity="0.95"/>`;
+    p+=`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*1.6).toFixed(1)}" fill="${col}" opacity="0.08"/>`;
+    const anim=isNew?`style="transform-origin:${bx.toFixed(1)}px ${by.toFixed(1)}px;transform:scale(0);animation:bloomIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.5s both"`:''
+    return `<g ${anim}>${p}</g>`;
   }
 
-  // ---- Trunk ----
-  // Build trunk as a filled tapered cubic-bezier shape
-  const lbx = CX - trunkBotW/2, lby = BASE_Y;
-  const ltx = trunkTopX - trunkTopW/2, lty = trunkTopY;
-  const lcp1x = lbx + W*0.010, lcp1y = BASE_Y - trunkH*0.32;
-  const lcp2x = ltx - W*0.012, lcp2y = trunkTopY + trunkH*0.26;
-  const rbx = CX + trunkBotW/2, rby = BASE_Y;
-  const rtx = trunkTopX + trunkTopW/2, rty = trunkTopY;
-  const rcp1x = rbx - W*0.006, rcp1y = BASE_Y - trunkH*0.38;
-  const rcp2x = rtx + W*0.014, rcp2y = trunkTopY + trunkH*0.20;
+  // ---- Trunk (filled cubic-bezier, always the same) ----
+  const lbx=CX-trunkBotW/2, lby=BASE_Y, ltx=trunkTopX-trunkTopW/2, lty=trunkTopY;
+  const lcp1x=lbx+W*0.010, lcp1y=BASE_Y-trunkH*0.32;
+  const lcp2x=ltx-W*0.012, lcp2y=trunkTopY+trunkH*0.26;
+  const rbx=CX+trunkBotW/2, rby=BASE_Y, rtx=trunkTopX+trunkTopW/2, rty=trunkTopY;
+  const rcp1x=rbx-W*0.006, rcp1y=BASE_Y-trunkH*0.38;
+  const rcp2x=rtx+W*0.014, rcp2y=trunkTopY+trunkH*0.20;
 
-  const trunkFillPath = `M ${lbx.toFixed(1)} ${lby.toFixed(1)} C ${lcp1x.toFixed(1)} ${lcp1y.toFixed(1)},${lcp2x.toFixed(1)} ${lcp2y.toFixed(1)},${ltx.toFixed(1)} ${lty.toFixed(1)} L ${rtx.toFixed(1)} ${rty.toFixed(1)} C ${rcp2x.toFixed(1)} ${rcp2y.toFixed(1)},${rcp1x.toFixed(1)} ${rcp1y.toFixed(1)},${rbx.toFixed(1)} ${rby.toFixed(1)} Z`;
-
-  // Lighter highlight stripe along trunk center
-  const hlbx = CX - trunkBotW*0.16, hltx = trunkTopX - trunkTopW*0.08;
-  const hrx  = CX + trunkBotW*0.16, hrtx = trunkTopX + trunkTopW*0.12;
-  const hlPath = `M ${hlbx.toFixed(1)} ${lby.toFixed(1)} C ${(hlbx+W*0.005).toFixed(1)} ${lcp1y.toFixed(1)},${(hltx-W*0.004).toFixed(1)} ${lcp2y.toFixed(1)},${hltx.toFixed(1)} ${lty.toFixed(1)} L ${hrtx.toFixed(1)} ${rty.toFixed(1)} C ${(hrtx+W*0.004).toFixed(1)} ${rcp2y.toFixed(1)},${(hrx-W*0.003).toFixed(1)} ${rcp1y.toFixed(1)},${hrx.toFixed(1)} ${rby.toFixed(1)} Z`;
-
-  // Bark texture lines
-  let barkLines = '';
-  _s = 0xcafe1234;
-  for (let k = 0; k < 8; k++) {
-    const t1 = rr(0.06, 0.48), t2 = Math.min(t1 + rr(0.10, 0.28), 0.92);
-    const y1 = BASE_Y - t1*trunkH, y2 = BASE_Y - t2*trunkH;
-    const bkW = trunkBotW*(1-t1) + trunkTopW*t1;
-    const x1 = CX + rr(-bkW*0.38, bkW*0.38);
-    const x2 = CX + rr(-bkW*0.25, bkW*0.25);
-    barkLines += `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${((x1+x2)/2+rr(-4,4)).toFixed(1)} ${((y1+y2)/2).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="#1e1208" stroke-width="${rr(0.6,1.4).toFixed(1)}" fill="none" opacity="${rr(0.28,0.52).toFixed(2)}"/>`;
-  }
-
-  // Root buttresses — flared curves at base
-  const rootFlareL = `M ${lbx.toFixed(1)} ${lby.toFixed(1)} Q ${(CX-trunkBotW*1.05).toFixed(1)} ${(BASE_Y-H*0.022).toFixed(1)} ${(CX-trunkBotW*1.55).toFixed(1)} ${BASE_Y.toFixed(1)}`;
-  const rootFlareR = `M ${rbx.toFixed(1)} ${rby.toFixed(1)} Q ${(CX+trunkBotW*1.05).toFixed(1)} ${(BASE_Y-H*0.022).toFixed(1)} ${(CX+trunkBotW*1.55).toFixed(1)} ${BASE_Y.toFixed(1)}`;
-  const rootW = (trunkBotW * 0.36).toFixed(1);
-
-  let trunkSVG = `<path d="${trunkFillPath}" fill="#3a2a1e"/>`;
-  trunkSVG += `<path d="${hlPath}" fill="#6b5040" opacity="0.26"/>`;
-  trunkSVG += barkLines;
-  trunkSVG += `<path d="${rootFlareL}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
-  trunkSVG += `<path d="${rootFlareR}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
-
-  // ---- Trunk centerline helper ----
-  // Returns { x, y } on the trunk center at height fraction t (0=base, 1=top)
   function trunkPtAt(t) {
-    const mt = 1 - t;
-    const lx = mt*mt*mt*lbx + 3*mt*mt*t*lcp1x + 3*mt*t*t*lcp2x + t*t*t*ltx;
-    const rx = mt*mt*mt*rbx + 3*mt*mt*t*rcp1x + 3*mt*t*t*rcp2x + t*t*t*rtx;
-    return { x: (lx+rx)/2, y: BASE_Y - t*trunkH };
+    const mt=1-t;
+    return {
+      x:((mt*mt*mt*lbx+3*mt*mt*t*lcp1x+3*mt*t*t*lcp2x+t*t*t*ltx)+(mt*mt*mt*rbx+3*mt*mt*t*rcp1x+3*mt*t*t*rcp2x+t*t*t*rtx))/2,
+      y:BASE_Y-t*trunkH
+    };
   }
 
-  // ---- Branches ----
-  const MAX_BRANCHES = 12;
-  const visibleWeeks = weeks.slice(-MAX_BRANCHES);
-  const VN = visibleWeeks.length;
-  let branchSVG = '', blossomSVG = '';
+  const trunkFill=`M ${lbx.toFixed(1)} ${lby.toFixed(1)} C ${lcp1x.toFixed(1)} ${lcp1y.toFixed(1)},${lcp2x.toFixed(1)} ${lcp2y.toFixed(1)},${ltx.toFixed(1)} ${lty.toFixed(1)} L ${rtx.toFixed(1)} ${rty.toFixed(1)} C ${rcp2x.toFixed(1)} ${rcp2y.toFixed(1)},${rcp1x.toFixed(1)} ${rcp1y.toFixed(1)},${rbx.toFixed(1)} ${rby.toFixed(1)} Z`;
+  const hlbx=CX-trunkBotW*0.16,hltx=trunkTopX-trunkTopW*0.08,hrx=CX+trunkBotW*0.16,hrtx=trunkTopX+trunkTopW*0.12;
+  const hlPath=`M ${hlbx.toFixed(1)} ${lby.toFixed(1)} C ${(hlbx+W*0.005).toFixed(1)} ${lcp1y.toFixed(1)},${(hltx-W*0.004).toFixed(1)} ${lcp2y.toFixed(1)},${hltx.toFixed(1)} ${lty.toFixed(1)} L ${hrtx.toFixed(1)} ${rty.toFixed(1)} C ${(hrtx+W*0.004).toFixed(1)} ${rcp2y.toFixed(1)},${(hrx-W*0.003).toFixed(1)} ${rcp1y.toFixed(1)},${hrx.toFixed(1)} ${rby.toFixed(1)} Z`;
 
-  visibleWeeks.forEach((week, i) => {
-    _s = 0xdead0000 + i * 0x9a3f; // per-branch seed reset for consistent shape
+  let barkLines='';
+  _s=0xcafe1234;
+  for(let k=0;k<9;k++){
+    const t1=rr(0.06,0.50), t2=Math.min(t1+rr(0.10,0.28),0.92);
+    const y1=BASE_Y-t1*trunkH, y2=BASE_Y-t2*trunkH;
+    const bkW=trunkBotW*(1-t1)+trunkTopW*t1;
+    const x1=CX+rr(-bkW*0.38,bkW*0.38), x2=CX+rr(-bkW*0.25,bkW*0.25);
+    barkLines+=`<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${((x1+x2)/2+rr(-4,4)).toFixed(1)} ${((y1+y2)/2).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="#1e1208" stroke-width="${rr(0.6,1.4).toFixed(1)}" fill="none" opacity="${rr(0.28,0.52).toFixed(2)}"/>`;
+  }
 
-    const t = VN <= 1 ? 0.45 : i / (VN - 1);
-    const attachT = 0.06 + t * 0.74;
-    const ap = trunkPtAt(attachT);
-    const attachX = ap.x, attachY = ap.y;
+  const rootW=(trunkBotW*0.38).toFixed(1);
+  const rootFL=`M ${lbx.toFixed(1)} ${lby.toFixed(1)} Q ${(CX-trunkBotW*1.10).toFixed(1)} ${(BASE_Y-H*0.024).toFixed(1)} ${(CX-trunkBotW*1.60).toFixed(1)} ${BASE_Y.toFixed(1)}`;
+  const rootFR=`M ${rbx.toFixed(1)} ${rby.toFixed(1)} Q ${(CX+trunkBotW*1.10).toFixed(1)} ${(BASE_Y-H*0.024).toFixed(1)} ${(CX+trunkBotW*1.60).toFixed(1)} ${BASE_Y.toFixed(1)}`;
 
-    const side = i % 2 === 0 ? 1 : -1;
-    const isDead = week.isMissed;
-    const isNew  = animateNew && i === VN - 1;
+  let trunkSVG=`<path d="${trunkFill}" fill="#3a2a1e"/>`;
+  trunkSVG+=`<path d="${hlPath}" fill="#6b5040" opacity="0.25"/>`;
+  trunkSVG+=barkLines;
+  trunkSVG+=`<path d="${rootFL}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
+  trunkSVG+=`<path d="${rootFR}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
 
-    // Branch angle: naturally upward and outward
-    const ang = side > 0
-      ? rr(30, 60) * Math.PI / 180
-      : rr(120, 150) * Math.PI / 180;
+  // ══════════════════════════════════════════════
+  // 6 BRANCH CLUSTERS — one per week of the 6-week cycle
+  // The skeleton is always visible (dim for future weeks).
+  // Sessions fill in 5-petal blossom flowers at the 4 twig tips.
+  // Full tree (all 24 sessions across 6 compliant weeks) = dense pink canopy.
+  // ══════════════════════════════════════════════
 
-    const mainLen = W * rr(0.20, 0.30);
-    const trunkW  = (trunkBotW*(1-attachT) + trunkTopW*attachT);
-    const mainW0  = trunkW * 0.68;
-    const mainW1  = mainW0 * 0.26;
+  // Map: last 6 calendar weeks → clusters 0-5 (left to right)
+  const recentWeeks = weeks.slice(-6);
+  const slots = [];
+  for(let i=0;i<6;i++){
+    const idx = i - (6 - recentWeeks.length);
+    slots.push(idx >= 0 ? recentWeeks[idx] : null);
+  }
 
-    const mainEndX = attachX + Math.cos(ang) * mainLen;
-    const mainEndY = attachY - Math.sin(ang) * mainLen;
+  // 6 cluster definitions: angle (radians), trunk attach height, main branch length
+  const CLUSTERS = [
+    {ang:148*Math.PI/180, attachT:0.86, len:W*0.235}, // far left
+    {ang:124*Math.PI/180, attachT:0.92, len:W*0.268}, // left
+    {ang:101*Math.PI/180, attachT:0.98, len:W*0.292}, // left-center (tallest)
+    {ang: 79*Math.PI/180, attachT:0.98, len:W*0.292}, // right-center
+    {ang: 56*Math.PI/180, attachT:0.92, len:W*0.268}, // right
+    {ang: 32*Math.PI/180, attachT:0.86, len:W*0.235}, // far right
+  ];
 
-    const newWrap  = isNew ? `<g style="opacity:0;animation:fadeIn 0.7s ease-out 0.15s forwards">` : '';
-    const newClose = isNew ? `</g>` : '';
+  let branchSVG='', blossomSVG='';
 
-    if (isDead) {
-      branchSVG += newWrap;
-      branchSVG += `<path d="M ${attachX.toFixed(1)} ${attachY.toFixed(1)} L ${mainEndX.toFixed(1)} ${mainEndY.toFixed(1)}" stroke="#2a2030" stroke-width="${(mainW0*0.52).toFixed(1)}" fill="none" stroke-linecap="round"/>`;
-      // One sparse sub-branch
-      const sp = along(attachX, attachY, mainEndX, mainEndY, 0.58);
-      const sa = ang + side * rr(18, 30) * Math.PI / 180;
-      const sl = mainLen * 0.48;
-      branchSVG += `<path d="M ${sp.x.toFixed(1)} ${sp.y.toFixed(1)} L ${(sp.x+Math.cos(sa)*sl).toFixed(1)} ${(sp.y-Math.sin(sa)*sl).toFixed(1)}" stroke="#2a2030" stroke-width="${(mainW0*0.28).toFixed(1)}" fill="none" stroke-linecap="round" opacity="0.7"/>`;
-      branchSVG += newClose;
-    } else {
-      branchSVG += newWrap;
+  CLUSTERS.forEach((def, ci) => {
+    _s = (0x1111*(ci+1)) ^ (0x9b3f*(ci+1)*(ci+2)); // deterministic per-cluster seed
 
-      // Main branch — filled tapered
-      branchSVG += `<path d="${taperedPath(attachX, attachY, mainEndX, mainEndY, mainW0, mainW1)}" fill="#4a3728"/>`;
-      // Inner highlight stripe
-      const inPt = along(attachX, attachY, mainEndX, mainEndY, 0.12);
-      branchSVG += `<path d="${taperedPath(inPt.x, inPt.y, mainEndX, mainEndY, mainW0*0.28, 0.5)}" fill="#6b5040" opacity="0.22"/>`;
+    const week = slots[ci];
+    const sessionsDone = week ? Math.min(week.sessions, 4) : 0;
+    const isDead = !!(week && week.isMissed);
+    const isCurrentWeek = !!(week && week.isCurrentWeek);
+    const isFuture = (week === null);
+    const hasAny = !isFuture && sessionsDone > 0;
 
-      // Split into 2 sub-branches near the end
-      const splitT = rr(0.55, 0.68);
-      const sp = along(attachX, attachY, mainEndX, mainEndY, splitT);
-      const subLen = mainLen * rr(0.46, 0.60);
-      const subW0  = mainW1 * 1.45, subW1 = subW0 * 0.24;
+    const ap = trunkPtAt(def.attachT);
+    const trunkW = trunkBotW*(1-def.attachT)+trunkTopW*def.attachT;
+    const mainW0 = trunkW*0.78, mainW1 = mainW0*0.25;
 
-      const subAng1 = ang + rr(20, 34) * Math.PI / 180 * side;
-      const subAng2 = ang - rr(16, 28) * Math.PI / 180 * side;
-      const s1ex = sp.x + Math.cos(subAng1)*subLen, s1ey = sp.y - Math.sin(subAng1)*subLen;
-      const s2ex = sp.x + Math.cos(subAng2)*subLen, s2ey = sp.y - Math.sin(subAng2)*subLen;
+    const mainEndX = ap.x+Math.cos(def.ang)*def.len;
+    const mainEndY = ap.y-Math.sin(def.ang)*def.len;
 
-      branchSVG += `<path d="${taperedPath(sp.x, sp.y, s1ex, s1ey, subW0, subW1)}" fill="#4a3728" opacity="0.90"/>`;
-      branchSVG += `<path d="${taperedPath(sp.x, sp.y, s2ex, s2ey, subW0, subW1)}" fill="#4a3728" opacity="0.90"/>`;
+    // Color scheme
+    const liveCol='#4a3728', deadCol='#2a2030', futureCol='#1e1630';
+    const branchCol = isDead ? deadCol : isFuture ? futureCol : liveCol;
+    const branchOpacity = isFuture ? 0.38 : 1.0;
 
-      // Tertiary twigs at sub-branch tips
-      const terLen = subLen * rr(0.40, 0.55);
-      const terW   = Math.max(subW1 * 0.9, 1.0).toFixed(1);
+    // Wrap newest session's cluster in fade-in animation
+    const isNewCluster = animateNew && isCurrentWeek && week && !week.isComplete && sessionsDone===1;
+    const wrapOpen  = isNewCluster ? `<g style="opacity:0;animation:fadeIn 0.7s ease-out 0.1s forwards">` : '';
+    const wrapClose = isNewCluster ? `</g>` : '';
+    branchSVG += wrapOpen;
 
-      const drawTwigs = (sx, sy, sa) => {
-        const t1a = sa + rr(20, 34)*Math.PI/180, t2a = sa - rr(18, 30)*Math.PI/180;
-        const t1ex = sx+Math.cos(t1a)*terLen, t1ey = sy-Math.sin(t1a)*terLen;
-        const t2ex = sx+Math.cos(t2a)*terLen, t2ey = sy-Math.sin(t2a)*terLen;
-        branchSVG += `<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t1ex.toFixed(1)}" y2="${t1ey.toFixed(1)}" stroke="#4a3728" stroke-width="${terW}" stroke-linecap="round" opacity="0.82"/>`;
-        branchSVG += `<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t2ex.toFixed(1)}" y2="${t2ey.toFixed(1)}" stroke="#4a3728" stroke-width="${terW}" stroke-linecap="round" opacity="0.82"/>`;
-        return [[t1ex, t1ey], [t2ex, t2ey]];
-      };
+    // Main branch — filled tapered shape
+    branchSVG+=`<path d="${taperedPath(ap.x,ap.y,mainEndX,mainEndY,mainW0,mainW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
+    if(!isFuture && !isDead){
+      const hi=along(ap.x,ap.y,mainEndX,mainEndY,0.18);
+      branchSVG+=`<path d="${taperedPath(hi.x,hi.y,mainEndX,mainEndY,mainW0*0.24,0.5)}" fill="#6b5040" opacity="0.20"/>`;
+    }
 
-      const ter1 = drawTwigs(s1ex, s1ey, subAng1);
-      const ter2 = drawTwigs(s2ex, s2ey, subAng2);
+    // Sub-branches split at 58% along main, spreading ±26°
+    const sp=along(ap.x,ap.y,mainEndX,mainEndY,0.58);
+    const subLen=def.len*0.50, subW0=mainW1*1.55, subW1=subW0*0.22;
+    const spread=26*Math.PI/180;
+    const subAng1=def.ang+spread, subAng2=def.ang-spread;
+    const s1ex=sp.x+Math.cos(subAng1)*subLen, s1ey=sp.y-Math.sin(subAng1)*subLen;
+    const s2ex=sp.x+Math.cos(subAng2)*subLen, s2ey=sp.y-Math.sin(subAng2)*subLen;
+    branchSVG+=`<path d="${taperedPath(sp.x,sp.y,s1ex,s1ey,subW0,subW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
+    branchSVG+=`<path d="${taperedPath(sp.x,sp.y,s2ex,s2ey,subW0,subW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
 
-      // Blossoms — 5-petal flowers clustered at twig tips
-      const blossomCols = ['#f4a0c0','#e87aaa','#fce4ef','#f0b8d0'];
-      const bCount = Math.min(week.sessions, 4);
+    // Tertiary twigs — 2 per sub-branch = 4 twig tips (one per session slot)
+    const terLen=subLen*0.46, terW=Math.max(subW1*0.85,1.2).toFixed(1);
+    const twigSpread=21*Math.PI/180;
+    const tips=[];
+    [[s1ex,s1ey,subAng1],[s2ex,s2ey,subAng2]].forEach(([sx,sy,sa])=>{
+      const t1a=sa+twigSpread, t2a=sa-twigSpread;
+      const t1ex=sx+Math.cos(t1a)*terLen, t1ey=sy-Math.sin(t1a)*terLen;
+      const t2ex=sx+Math.cos(t2a)*terLen, t2ey=sy-Math.sin(t2a)*terLen;
+      branchSVG+=`<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t1ex.toFixed(1)}" y2="${t1ey.toFixed(1)}" stroke="${branchCol}" stroke-width="${terW}" stroke-linecap="round" opacity="${branchOpacity}"/>`;
+      branchSVG+=`<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t2ex.toFixed(1)}" y2="${t2ey.toFixed(1)}" stroke="${branchCol}" stroke-width="${terW}" stroke-linecap="round" opacity="${branchOpacity}"/>`;
+      tips.push({x:t1ex,y:t1ey});
+      tips.push({x:t2ex,y:t2ey});
+    });
 
-      if (bCount > 0) {
-        const centers = [
-          along(sp.x, sp.y, s1ex, s1ey, 0.86),
-          along(sp.x, sp.y, s2ex, s2ey, 0.86),
-          { x: ter1[0][0], y: ter1[0][1] },
-          { x: ter2[0][0], y: ter2[0][1] },
-        ];
+    branchSVG += wrapClose;
 
-        const flowerR = W * 0.021;
-        for (let b = 0; b < bCount; b++) {
-          const center = centers[b % centers.length];
-          const clusterN = 2 + b; // more blossoms for more sessions
-          for (let c = 0; c < clusterN; c++) {
-            const ox = rr(-W*0.024, W*0.024);
-            const oy = rr(-H*0.018, H*0.018);
-            const col = blossomCols[Math.abs(i*5 + b*3 + c) % 4];
-            const fr  = flowerR * rr(0.72, 1.18);
-            const isNewBlossom = isNew && b === bCount-1 && c === 0;
-            blossomSVG += blossomFlower(center.x+ox, center.y+oy, fr, col, isNewBlossom);
-          }
+    // ---- Blossoms ----
+    const blossomCols=['#f4a0c0','#e87aaa','#fce4ef','#f0b8d0'];
+    const flowerR=W*0.022;
+
+    if(isDead){
+      // Small dark buds on dead branches
+      tips.forEach(tip=>{
+        blossomSVG+=`<circle cx="${tip.x.toFixed(1)}" cy="${tip.y.toFixed(1)}" r="${(W*0.009).toFixed(1)}" fill="${deadCol}" opacity="0.55"/>`;
+      });
+    } else if(hasAny){
+      for(let b=0;b<4;b++){
+        if(b>=sessionsDone) break;
+        const tip=tips[b];
+        const isNewBlossom = animateNew && isCurrentWeek && b===sessionsDone-1;
+        // 5 flowers clustered at each twig tip — adjacents overlap for dense canopy
+        for(let f=0;f<5;f++){
+          _s=(_s*1103515245+12345)&0x7fffffff;
+          const ox=(_s%1000)/1000*W*0.052-W*0.026;
+          _s=(_s*1103515245+12345)&0x7fffffff;
+          const oy=(_s%1000)/1000*H*0.042-H*0.021;
+          const fc=blossomCols[(b*3+f+ci)%4];
+          const frs=flowerR*(0.72+(_s%100)/100*0.46);
+          blossomSVG+=blossomFlower(tip.x+ox, tip.y+oy, frs, fc, isNewBlossom&&f===0);
         }
       }
+    }
 
-      // Pulsing dot for current in-progress week
-      if (week.isCurrentWeek && week.sessions > 0 && !week.isComplete) {
-        const ppt = along(sp.x, sp.y, s1ex, s1ey, 0.92);
-        const pr = W * 0.016;
-        blossomSVG += `<circle cx="${ppt.x.toFixed(1)}" cy="${ppt.y.toFixed(1)}" r="${pr.toFixed(1)}" fill="var(--blossom2)" opacity="0.5">
-          <animate attributeName="r" values="${pr};${pr*1.75};${pr}" dur="2s" repeatCount="indefinite"/>
-          <animate attributeName="opacity" values="0.5;0.1;0.5" dur="2s" repeatCount="indefinite"/>
-        </circle>`;
-      }
-
-      branchSVG += newClose;
+    // Pulsing dot for the current in-progress week
+    if(isCurrentWeek && sessionsDone>0 && week && !week.isComplete){
+      const ppt=tips[sessionsDone-1]||tips[0];
+      const pr=W*0.015;
+      blossomSVG+=`<circle cx="${ppt.x.toFixed(1)}" cy="${ppt.y.toFixed(1)}" r="${pr.toFixed(1)}" fill="var(--blossom2)" opacity="0.55">
+        <animate attributeName="r" values="${pr};${(pr*1.8).toFixed(1)};${pr}" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.55;0.1;0.55" dur="2s" repeatCount="indefinite"/>
+      </circle>`;
     }
   });
 
-  // Defs & background
-  const defs = `<defs>
-    <radialGradient id="sky" cx="50%" cy="15%" r="80%">
-      <stop offset="0%" stop-color="#1a1025"/>
+  const defs=`<defs>
+    <radialGradient id="sky" cx="50%" cy="12%" r="85%">
+      <stop offset="0%" stop-color="#1e1230"/>
+      <stop offset="60%" stop-color="#120e1e"/>
       <stop offset="100%" stop-color="#0d0d0f"/>
     </radialGradient>
   </defs>`;
-  const bg = `<rect width="${W}" height="${H}" fill="url(#sky)"/>`;
+  const bg=`<rect width="${W}" height="${H}" fill="url(#sky)"/>`;
 
-  let emptyLabel = '';
-  if (weeks.length === 0) {
-    emptyLabel = `<text x="${W/2}" y="${H*0.65}" text-anchor="middle" fill="#3a3040"
-      font-family="DM Sans,sans-serif" font-size="${W*0.035}">Begin your first session</text>`;
+  let emptyLabel='';
+  if(weeks.length===0){
+    emptyLabel=`<text x="${W/2}" y="${H*0.62}" text-anchor="middle" fill="#3a3040" font-family="DM Sans,sans-serif" font-size="${W*0.035}">Begin your first session</text>`;
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="overflow:visible">
@@ -1173,14 +1215,14 @@ function recordSession() {
 }
 
 function buildCompleteScreen() {
-  const history = state.history;
-  const info = getSessionInfo(state.currentSession - 1); // just-completed session
+  const info = getSessionInfo(state.currentSession - 1);
   const streak = state.weekStreak;
   const wk = weekKey(new Date());
   const weekCount = state.history.filter(h => weekKey(new Date(h.date)) === wk).length;
   const isWeekComplete = weekCount >= 4;
+  const cycleResult = checkCycleCompletion();
 
-  const weekPanel = isWeekComplete ? `
+  const weekPanel = isWeekComplete && !cycleResult ? `
     <div class="weekly-panel">
       <div class="weekly-panel-icon">🌸</div>
       <div class="weekly-panel-title">Week complete.</div>
@@ -1189,7 +1231,7 @@ function buildCompleteScreen() {
 
   return `<div class="complete-screen">
     <div class="complete-blossom">🌸</div>
-    <div class="complete-title">Session done</div>
+    <div class="complete-title">${cycleResult ? 'Cycle complete!' : 'Session done'}</div>
     <div style="font-size:13px;color:var(--muted);font-family:'DM Mono',monospace">
       ${blockLabel(info.block)} · ${info.blockSession} of 8
     </div>
@@ -1212,6 +1254,7 @@ function buildCompleteScreen() {
       </div>
     </div>
     ${weekPanel}
+    ${cycleResult ? buildCycleCompletionPanel(cycleResult) : ''}
     <button class="big-btn btn-primary" onclick="goToTree()" style="max-width:280px">See your tree</button>
     <div style="height:8px"></div>
   </div>`;
@@ -1235,7 +1278,10 @@ function fmtTime(secs) {
 // ══════════════════════════════════════════════
 function renderProgramTab() {
   const container = document.getElementById('program-content');
-  container.innerHTML = buildBlockCards() + buildExerciseEditor();
+  const cycleResult = checkCycleCompletion();
+  container.innerHTML = buildBlockCards() + buildExerciseEditor() + buildCalendar()
+    + buildCycleCompletionPanel(cycleResult)
+    + `<div class="reset-zone"><button class="reset-btn" onclick="confirmReset()">Reset all data</button></div>`;
 }
 
 function buildBlockCards() {
@@ -1406,6 +1452,116 @@ function saveCustom(key) {
   row.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('selected'));
   input.value = '';
   toggleEditor(key);
+}
+
+// ══════════════════════════════════════════════
+//  CALENDAR
+// ══════════════════════════════════════════════
+function buildCalendar() {
+  if(!state.history.length) return '';
+
+  const byDate = {};
+  state.history.forEach(h => {
+    const d = new Date(h.date).toISOString().slice(0,10);
+    byDate[d] = (byDate[d]||0)+1;
+  });
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0,10);
+  // Show last 13 weeks
+  const monday = getWeekMonday(now);
+  let html = `<div class="section-label" style="margin-top:24px">Activity — last 13 weeks</div>`;
+  html += `<div class="cal-grid">`;
+  // Day headers
+  html += `<div class="cal-week-row cal-header">`;
+  ['M','T','W','T','F','S','S'].forEach(d=>{ html+=`<div class="cal-day-label">${d}</div>`; });
+  html += `</div>`;
+
+  for(let w=12;w>=0;w--){
+    html += `<div class="cal-week-row">`;
+    for(let d=0;d<7;d++){
+      const day = new Date(monday);
+      day.setDate(day.getDate() - w*7 + d);
+      const key = day.toISOString().slice(0,10);
+      const count = byDate[key]||0;
+      const isFuture = key > todayStr;
+      if(isFuture){
+        html+=`<div class="cal-day future"></div>`;
+      } else if(count===0){
+        html+=`<div class="cal-day empty" title="${key}"></div>`;
+      } else if(count===1){
+        html+=`<div class="cal-day done" title="${key}: ${count} session">·</div>`;
+      } else {
+        html+=`<div class="cal-day done-multi" title="${key}: ${count} sessions">${count}</div>`;
+      }
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+// ══════════════════════════════════════════════
+//  CYCLE COMPLETION
+// ══════════════════════════════════════════════
+function checkCycleCompletion() {
+  // Returns null if no cycle just completed, else {compliantWeeks, cycleNum}
+  // A cycle is sessions 1-24, 25-48, etc.
+  const completed = state.totalCompleted;
+  if(completed === 0 || completed % 24 !== 0) return null;
+  const cycleNum = completed / 24;
+  // Count compliant weeks in the last 6 calendar weeks
+  const last6 = getAllWeeks().slice(-6);
+  const compliantWeeks = last6.filter(w=>w.isComplete).length;
+  return { cycleNum, compliantWeeks };
+}
+
+function buildCycleCompletionPanel(cycleResult) {
+  if(!cycleResult) return '';
+  const { compliantWeeks, cycleNum } = cycleResult;
+  const isHigh = compliantWeeks >= 5;
+  const isLow  = compliantWeeks <= 3;
+
+  let rec, details;
+  if(isHigh){
+    rec = 'Advance: harder program';
+    details = `${compliantWeeks}/6 compliant weeks — excellent discipline. The next cycle adds heavier reps and introduces ring push-ups and pistol squats as optional variations.`;
+  } else if(isLow){
+    rec = 'Adjust: modified program';
+    details = `${compliantWeeks}/6 compliant weeks — consistency was the challenge. The next cycle keeps the same rep scheme but reduces the focus block peak by 1 rep to make hitting all 4 sessions easier.`;
+  } else {
+    rec = 'Continue: standard progression';
+    details = `${compliantWeeks}/6 compliant weeks — solid work. Standard +1 rep baseline increase applies to all movements next cycle.`;
+  }
+
+  return `<div class="cycle-panel">
+    <div class="cycle-panel-title">Cycle ${cycleNum} complete</div>
+    <div class="cycle-panel-body">${details}</div>
+    <div class="cycle-choice-row">
+      ${isHigh||(!isLow&&!isHigh)?`<button class="cycle-choice-btn harder" onclick="applyCycleChoice('harder')">Harder</button>`:''}
+      <button class="cycle-choice-btn standard" onclick="applyCycleChoice('standard')">Standard</button>
+      ${isLow||(!isLow&&!isHigh)?`<button class="cycle-choice-btn easier" onclick="applyCycleChoice('easier')">Easier</button>`:''}
+    </div>
+    <div class="cycle-panel-sub">${rec}</div>
+  </div>`;
+}
+
+function applyCycleChoice(choice) {
+  state.cycleChoice = choice; // stored but not used to change rep tables — user awareness feature
+  saveState();
+  // Remove panel
+  const panel = document.querySelector('.cycle-panel');
+  if(panel){ panel.style.opacity='0'; panel.style.transition='opacity 0.4s'; setTimeout(()=>panel.remove(),400); }
+}
+
+// ══════════════════════════════════════════════
+//  RESET
+// ══════════════════════════════════════════════
+function confirmReset() {
+  if(confirm('Reset everything? Your tree, all session history, and streak will be permanently deleted.')) {
+    localStorage.removeItem(STORAGE_KEY);
+    location.reload();
+  }
 }
 
 // ══════════════════════════════════════════════
