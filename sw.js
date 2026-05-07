@@ -1,4 +1,4 @@
-const CACHE = 'circuit-v6';
+const CACHE = 'circuit-v7';
 const ASSETS = [
   './index.html',
   './manifest.json',
