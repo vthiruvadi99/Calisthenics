@@ -143,6 +143,9 @@ svg{display:block}
 }
 .branch-new{stroke-dasharray:300;animation:branchGrow 0.8s ease-out forwards}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes gokuBob{0%,100%{transform:translateY(0px)}50%{transform:translateY(-7px)}}
+@keyframes auraPulse{0%,100%{opacity:0.75;transform:scaleX(1)}50%{opacity:0.55;transform:scaleX(1.06)}}
+@keyframes spark{0%{opacity:0.9}40%{opacity:0.1}100%{opacity:0.9}}
 
 /* ══════════════════════════════
    WORKOUT TAB
@@ -698,234 +701,232 @@ function qBezier(t, x0, y0, cx, cy, x1, y1) {
   };
 }
 
-function buildTreeSVG(width, height, animateNew) {
-  const weeks = getAllWeeks();
+function buildGokuSVG(width, height, animateNew) {
   const W = width, H = height;
+  const total = state.totalCompleted || 0;
 
-  // Seeded XOR-shift RNG
-  let _s = 0xcafe1234;
-  const rng = () => { _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5; return (_s >>> 0) / 4294967296; };
-  const rr  = (a, b) => a + rng() * (b - a);
-
-  const CX = W * 0.50, BASE_Y = H * 0.97;
-
-  // Fixed trunk — always the same proportions regardless of progress
-  const trunkH    = H * 0.44;
-  const trunkTopX = CX - W * 0.018;
-  const trunkTopY = BASE_Y - trunkH;
-  const trunkBotW = W * 0.072;
-  const trunkTopW = W * 0.019;
-
-  // ---- Helpers ----
-  function taperedPath(x0, y0, x1, y1, w0, w1) {
-    const dx=x1-x0, dy=y1-y0, l=Math.sqrt(dx*dx+dy*dy);
-    if(l<0.5) return '';
-    const nx=-dy/l, ny=dx/l;
-    const ax=x0+nx*w0/2, ay=y0+ny*w0/2, bx=x0-nx*w0/2, by=y0-ny*w0/2;
-    const cx=x1+nx*w1/2, cy=y1+ny*w1/2, dx2=x1-nx*w1/2, dy2=y1-ny*w1/2;
-    const midX=(x0+x1)/2, midY=(y0+y1)/2, bulge=l*0.04;
-    return `M ${ax.toFixed(1)} ${ay.toFixed(1)} Q ${(midX+nx*bulge).toFixed(1)} ${(midY+ny*bulge).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)} L ${dx2.toFixed(1)} ${dy2.toFixed(1)} Q ${(midX-nx*bulge).toFixed(1)} ${(midY-ny*bulge).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)} Z`;
-  }
-
-  const along = (x0,y0,x1,y1,t) => ({x:x0+(x1-x0)*t, y:y0+(y1-y0)*t});
-
-  function blossomFlower(bx, by, r, col, isNew) {
-    const cols=['#f4a0c0','#fce4ef','#e87aaa','#f0b8d0','#f9c8de'];
-    let p='';
-    for(let i=0;i<5;i++){
-      const a=(i/5)*Math.PI*2-Math.PI/2;
-      const px=bx+Math.cos(a)*r*0.60, py=by+Math.sin(a)*r*0.60;
-      p+=`<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(r*0.54).toFixed(1)}" ry="${(r*0.38).toFixed(1)}" fill="${cols[i]}" opacity="0.87" transform="rotate(${(a*180/Math.PI+90).toFixed(1)},${px.toFixed(1)},${py.toFixed(1)})"/>`;
-    }
-    p+=`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*0.20).toFixed(1)}" fill="#ffe8f5" opacity="0.95"/>`;
-    p+=`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="${(r*1.3).toFixed(1)}" fill="${col}" opacity="0.06"/>`;
-    const anim=isNew?`style="transform-origin:${bx.toFixed(1)}px ${by.toFixed(1)}px;transform:scale(0);animation:bloomIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.5s both"`:''
-    return `<g ${anim}>${p}</g>`;
-  }
-
-  // ---- Trunk (filled cubic-bezier, always the same) ----
-  const lbx=CX-trunkBotW/2, lby=BASE_Y, ltx=trunkTopX-trunkTopW/2, lty=trunkTopY;
-  const lcp1x=lbx+W*0.010, lcp1y=BASE_Y-trunkH*0.32;
-  const lcp2x=ltx-W*0.012, lcp2y=trunkTopY+trunkH*0.26;
-  const rbx=CX+trunkBotW/2, rby=BASE_Y, rtx=trunkTopX+trunkTopW/2, rty=trunkTopY;
-  const rcp1x=rbx-W*0.006, rcp1y=BASE_Y-trunkH*0.38;
-  const rcp2x=rtx+W*0.014, rcp2y=trunkTopY+trunkH*0.20;
-
-  function trunkPtAt(t) {
-    const mt=1-t;
-    return {
-      x:((mt*mt*mt*lbx+3*mt*mt*t*lcp1x+3*mt*t*t*lcp2x+t*t*t*ltx)+(mt*mt*mt*rbx+3*mt*mt*t*rcp1x+3*mt*t*t*rcp2x+t*t*t*rtx))/2,
-      y:BASE_Y-t*trunkH
-    };
-  }
-
-  const trunkFill=`M ${lbx.toFixed(1)} ${lby.toFixed(1)} C ${lcp1x.toFixed(1)} ${lcp1y.toFixed(1)},${lcp2x.toFixed(1)} ${lcp2y.toFixed(1)},${ltx.toFixed(1)} ${lty.toFixed(1)} L ${rtx.toFixed(1)} ${rty.toFixed(1)} C ${rcp2x.toFixed(1)} ${rcp2y.toFixed(1)},${rcp1x.toFixed(1)} ${rcp1y.toFixed(1)},${rbx.toFixed(1)} ${rby.toFixed(1)} Z`;
-  const hlbx=CX-trunkBotW*0.16,hltx=trunkTopX-trunkTopW*0.08,hrx=CX+trunkBotW*0.16,hrtx=trunkTopX+trunkTopW*0.12;
-  const hlPath=`M ${hlbx.toFixed(1)} ${lby.toFixed(1)} C ${(hlbx+W*0.005).toFixed(1)} ${lcp1y.toFixed(1)},${(hltx-W*0.004).toFixed(1)} ${lcp2y.toFixed(1)},${hltx.toFixed(1)} ${lty.toFixed(1)} L ${hrtx.toFixed(1)} ${rty.toFixed(1)} C ${(hrtx+W*0.004).toFixed(1)} ${rcp2y.toFixed(1)},${(hrx-W*0.003).toFixed(1)} ${rcp1y.toFixed(1)},${hrx.toFixed(1)} ${rby.toFixed(1)} Z`;
-
-  let barkLines='';
-  _s=0xcafe1234;
-  for(let k=0;k<9;k++){
-    const t1=rr(0.06,0.50), t2=Math.min(t1+rr(0.10,0.28),0.92);
-    const y1=BASE_Y-t1*trunkH, y2=BASE_Y-t2*trunkH;
-    const bkW=trunkBotW*(1-t1)+trunkTopW*t1;
-    const x1=CX+rr(-bkW*0.38,bkW*0.38), x2=CX+rr(-bkW*0.25,bkW*0.25);
-    barkLines+=`<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${((x1+x2)/2+rr(-4,4)).toFixed(1)} ${((y1+y2)/2).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="#1e1208" stroke-width="${rr(0.6,1.4).toFixed(1)}" fill="none" opacity="${rr(0.28,0.52).toFixed(2)}"/>`;
-  }
-
-  const rootW=(trunkBotW*0.38).toFixed(1);
-  const rootFL=`M ${lbx.toFixed(1)} ${lby.toFixed(1)} Q ${(CX-trunkBotW*1.10).toFixed(1)} ${(BASE_Y-H*0.024).toFixed(1)} ${(CX-trunkBotW*1.60).toFixed(1)} ${BASE_Y.toFixed(1)}`;
-  const rootFR=`M ${rbx.toFixed(1)} ${rby.toFixed(1)} Q ${(CX+trunkBotW*1.10).toFixed(1)} ${(BASE_Y-H*0.024).toFixed(1)} ${(CX+trunkBotW*1.60).toFixed(1)} ${BASE_Y.toFixed(1)}`;
-
-  let trunkSVG=`<path d="${trunkFill}" fill="#3a2a1e"/>`;
-  trunkSVG+=`<path d="${hlPath}" fill="#6b5040" opacity="0.25"/>`;
-  trunkSVG+=barkLines;
-  trunkSVG+=`<path d="${rootFL}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
-  trunkSVG+=`<path d="${rootFR}" stroke="#3a2a1e" stroke-width="${rootW}" fill="none" stroke-linecap="round"/>`;
-
-  // ══════════════════════════════════════════════
-  // 6 BRANCH CLUSTERS — one per week of the 6-week cycle
-  // The skeleton is always visible (dim for future weeks).
-  // Sessions fill in 5-petal blossom flowers at the 4 twig tips.
-  // Full tree (all 24 sessions across 6 compliant weeks) = dense pink canopy.
-  // ══════════════════════════════════════════════
-
-  // Map: last 6 calendar weeks → clusters 0-5 (left to right)
-  // Week 1 → cluster 0 (leftmost), tree fills left to right as weeks complete
+  // 6 stages — one unlocked per completed week (4 sessions) in the current 6-week cycle
+  // Week 1 done → stage 1, week 2 → stage 2, … week 6 → stage 5 (fully powered)
+  // Each new cycle repeats but starts one stage higher (capped at 5)
+  const weeks = getAllWeeks();
   const recentWeeks = weeks.slice(-6);
-  const slots = [];
-  for(let i=0;i<6;i++){
-    slots.push(i < recentWeeks.length ? recentWeeks[i] : null);
+  const completedWeeks = recentWeeks.filter(w => w.isComplete).length;
+  const cycleBonus = Math.floor(total / 24);
+  const stage = Math.min(completedWeeks + cycleBonus, 5);
+
+  // Visual config — 6 stages
+  const STAGES = [
+    {hair:'#1a1a1a', auraRGB:'0,0,0',        label:'',                   lc:'#666677'}, // 0 = Base
+    {hair:'#1a1a1a', auraRGB:'255,80,60',     label:'Kaioken',            lc:'#ff6655'}, // 1 wk
+    {hair:'#f5d020', auraRGB:'245,208,32',    label:'Super Saiyan',       lc:'#f5d020'}, // 2 wks
+    {hair:'#f5d020', auraRGB:'255,230,80',    label:'Super Saiyan 2',     lc:'#ffe44a'}, // 3 wks
+    {hair:'#f5d020', auraRGB:'255,200,50',    label:'Super Saiyan 3',     lc:'#ffd740'}, // 4 wks — long hair variant
+    {hair:'#5599ff', auraRGB:'85,153,255',    label:'Super Saiyan Blue',  lc:'#88bbff'}, // 5-6 wks
+  ];
+  const st = STAGES[stage];
+
+  const cx = W * 0.50;
+  const s  = Math.min(W, H) / 340; // scale factor
+
+  // Key body positions
+  const footY    = H * 0.84;
+  const legH     = 68 * s;
+  const bodyH    = 62 * s;
+  const headR    = 27 * s;
+  const legTopY  = footY - legH;
+  const bodyTopY = legTopY - bodyH;
+  const headCY   = bodyTopY - headR * 0.7;
+
+  const GI    = '#f07010';
+  const BELT  = '#3a50cc';
+  const UNDER = '#2255bb';
+  const SKIN  = '#f5c5a0';
+  const BOOT  = '#181830';
+  const BAND  = '#444455';
+  const armW  = 13 * s;
+  const legW  = 17 * s;
+
+  // helpers
+  const fmt = n => n.toFixed(1);
+  function spike(bx, by, ang, len, w, col) {
+    const r = ang * Math.PI / 180;
+    const tx = bx + Math.cos(r)*len, ty = by - Math.sin(r)*len;
+    const px = -Math.sin(r), py = -Math.cos(r);
+    return `<path d="M ${fmt(bx+px*w/2)} ${fmt(by+py*w/2)} L ${fmt(tx)} ${fmt(ty)} L ${fmt(bx-px*w/2)} ${fmt(by-py*w/2)} Z" fill="${col}"/>`;
   }
 
-  // 6 cluster definitions: angle (radians), trunk attach height, main branch length
-  const CLUSTERS = [
-    {ang:148*Math.PI/180, attachT:0.86, len:W*0.235}, // far left
-    {ang:124*Math.PI/180, attachT:0.92, len:W*0.268}, // left
-    {ang:101*Math.PI/180, attachT:0.98, len:W*0.292}, // left-center (tallest)
-    {ang: 79*Math.PI/180, attachT:0.98, len:W*0.292}, // right-center
-    {ang: 56*Math.PI/180, attachT:0.92, len:W*0.268}, // right
-    {ang: 32*Math.PI/180, attachT:0.86, len:W*0.235}, // far right
-  ];
+  let out = '';
 
-  let branchSVG='', blossomSVG='';
+  // ── Background ──
+  const bgDeep = stage >= 2 ? '#0a0510' : '#0d0d0f';
+  out += `<rect width="${W}" height="${H}" fill="${bgDeep}"/>`;
 
-  CLUSTERS.forEach((def, ci) => {
-    _s = (0x1111*(ci+1)) ^ (0x9b3f*(ci+1)*(ci+2)); // deterministic per-cluster seed
-
-    const week = slots[ci];
-    const sessionsDone = week ? Math.min(week.sessions, 4) : 0;
-    const isDead = !!(week && week.isMissed);
-    const isCurrentWeek = !!(week && week.isCurrentWeek);
-    const isFuture = (week === null);
-    const hasAny = !isFuture && sessionsDone > 0;
-
-    const ap = trunkPtAt(def.attachT);
-    const trunkW = trunkBotW*(1-def.attachT)+trunkTopW*def.attachT;
-    const mainW0 = trunkW*0.78, mainW1 = mainW0*0.25;
-
-    const mainEndX = ap.x+Math.cos(def.ang)*def.len;
-    const mainEndY = ap.y-Math.sin(def.ang)*def.len;
-
-    // Color scheme
-    const liveCol='#4a3728', deadCol='#2a2030', futureCol='#1e1630';
-    const branchCol = isDead ? deadCol : isFuture ? futureCol : liveCol;
-    const branchOpacity = isFuture ? 0.38 : 1.0;
-
-    // Wrap newest session's cluster in fade-in animation
-    const isNewCluster = animateNew && isCurrentWeek && week && !week.isComplete && sessionsDone===1;
-    const wrapOpen  = isNewCluster ? `<g style="opacity:0;animation:fadeIn 0.7s ease-out 0.1s forwards">` : '';
-    const wrapClose = isNewCluster ? `</g>` : '';
-    branchSVG += wrapOpen;
-
-    // Main branch — filled tapered shape
-    branchSVG+=`<path d="${taperedPath(ap.x,ap.y,mainEndX,mainEndY,mainW0,mainW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
-    if(!isFuture && !isDead){
-      const hi=along(ap.x,ap.y,mainEndX,mainEndY,0.18);
-      branchSVG+=`<path d="${taperedPath(hi.x,hi.y,mainEndX,mainEndY,mainW0*0.24,0.5)}" fill="#6b5040" opacity="0.20"/>`;
-    }
-
-    // Sub-branches split at 58% along main, spreading ±26°
-    const sp=along(ap.x,ap.y,mainEndX,mainEndY,0.58);
-    const subLen=def.len*0.50, subW0=mainW1*1.55, subW1=subW0*0.22;
-    const spread=26*Math.PI/180;
-    const subAng1=def.ang+spread, subAng2=def.ang-spread;
-    const s1ex=sp.x+Math.cos(subAng1)*subLen, s1ey=sp.y-Math.sin(subAng1)*subLen;
-    const s2ex=sp.x+Math.cos(subAng2)*subLen, s2ey=sp.y-Math.sin(subAng2)*subLen;
-    branchSVG+=`<path d="${taperedPath(sp.x,sp.y,s1ex,s1ey,subW0,subW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
-    branchSVG+=`<path d="${taperedPath(sp.x,sp.y,s2ex,s2ey,subW0,subW1)}" fill="${branchCol}" opacity="${branchOpacity}"/>`;
-
-    // Tertiary twigs — 2 per sub-branch = 4 twig tips (one per session slot)
-    const terLen=subLen*0.46, terW=Math.max(subW1*0.85,1.2).toFixed(1);
-    const twigSpread=21*Math.PI/180;
-    const tips=[];
-    [[s1ex,s1ey,subAng1],[s2ex,s2ey,subAng2]].forEach(([sx,sy,sa])=>{
-      const t1a=sa+twigSpread, t2a=sa-twigSpread;
-      const t1ex=sx+Math.cos(t1a)*terLen, t1ey=sy-Math.sin(t1a)*terLen;
-      const t2ex=sx+Math.cos(t2a)*terLen, t2ey=sy-Math.sin(t2a)*terLen;
-      branchSVG+=`<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t1ex.toFixed(1)}" y2="${t1ey.toFixed(1)}" stroke="${branchCol}" stroke-width="${terW}" stroke-linecap="round" opacity="${branchOpacity}"/>`;
-      branchSVG+=`<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${t2ex.toFixed(1)}" y2="${t2ey.toFixed(1)}" stroke="${branchCol}" stroke-width="${terW}" stroke-linecap="round" opacity="${branchOpacity}"/>`;
-      tips.push({x:t1ex,y:t1ey});
-      tips.push({x:t2ex,y:t2ey});
-    });
-
-    branchSVG += wrapClose;
-
-    // ---- Blossoms ----
-    const blossomCols=['#f4a0c0','#e87aaa','#fce4ef','#f0b8d0'];
-    const flowerR=W*0.022;
-
-    if(isDead){
-      // Small dark buds on dead branches
-      tips.forEach(tip=>{
-        blossomSVG+=`<circle cx="${tip.x.toFixed(1)}" cy="${tip.y.toFixed(1)}" r="${(W*0.009).toFixed(1)}" fill="${deadCol}" opacity="0.55"/>`;
-      });
-    } else if(hasAny){
-      for(let b=0;b<4;b++){
-        if(b>=sessionsDone) break;
-        const tip=tips[b];
-        const isNewBlossom = animateNew && isCurrentWeek && b===sessionsDone-1;
-        // 5 flowers clustered at each twig tip — adjacents overlap for dense canopy
-        for(let f=0;f<5;f++){
-          _s=(_s*1103515245+12345)&0x7fffffff;
-          const ox=(_s%1000)/1000*W*0.052-W*0.026;
-          _s=(_s*1103515245+12345)&0x7fffffff;
-          const oy=(_s%1000)/1000*H*0.042-H*0.021;
-          const fc=blossomCols[(b*3+f+ci)%4];
-          const frs=flowerR*(0.72+(_s%100)/100*0.46);
-          blossomSVG+=blossomFlower(tip.x+ox, tip.y+oy, frs, fc, isNewBlossom&&f===0);
-        }
-      }
-    }
-
-    // Pulsing dot for the current in-progress week
-    if(isCurrentWeek && sessionsDone>0 && week && !week.isComplete){
-      const ppt=tips[sessionsDone-1]||tips[0];
-      const pr=W*0.015;
-      blossomSVG+=`<circle cx="${ppt.x.toFixed(1)}" cy="${ppt.y.toFixed(1)}" r="${pr.toFixed(1)}" fill="var(--blossom2)" opacity="0.55">
-        <animate attributeName="r" values="${pr};${(pr*1.8).toFixed(1)};${pr}" dur="2s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.55;0.1;0.55" dur="2s" repeatCount="indefinite"/>
-      </circle>`;
-    }
-  });
-
-  const defs=`<defs>
-    <radialGradient id="sky" cx="50%" cy="12%" r="85%">
-      <stop offset="0%" stop-color="#1e1230"/>
-      <stop offset="60%" stop-color="#120e1e"/>
-      <stop offset="100%" stop-color="#0d0d0f"/>
+  // Subtle radial sky
+  out += `<defs>
+    <radialGradient id="sky2" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="rgba(${st.auraRGB},0.08)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
     </radialGradient>
   </defs>`;
-  const bg=`<rect width="${W}" height="${H}" fill="url(#sky)"/>`;
+  out += `<rect width="${W}" height="${H}" fill="url(#sky2)"/>`;
 
-  let emptyLabel='';
-  if(weeks.length===0){
-    emptyLabel=`<text x="${W/2}" y="${H*0.62}" text-anchor="middle" fill="#3a3040" font-family="DM Sans,sans-serif" font-size="${W*0.035}">Begin your first session</text>`;
+  // Ground shadow
+  out += `<ellipse cx="${fmt(cx)}" cy="${fmt(footY+3*s)}" rx="${fmt(60*s)}" ry="${fmt(7*s)}" fill="#000" opacity="0.45"/>`;
+
+  // ── Aura ──
+  if (stage > 0) {
+    const aW = (90 + stage*45) * s;
+    const aH = (180 + stage*50) * s;
+    const aY = headCY - aH * 0.35;
+
+    // Outer glow ellipse
+    out += `<ellipse cx="${fmt(cx)}" cy="${fmt(aY+aH*0.5)}" rx="${fmt(aW)}" ry="${fmt(aH/2)}" fill="rgba(${st.auraRGB},0.18)" style="animation:auraPulse 1.4s ease-in-out infinite;transform-origin:${fmt(cx)}px ${fmt(aY+aH*0.5)}px"/>`;
+    // Inner bright core
+    out += `<ellipse cx="${fmt(cx)}" cy="${fmt(aY+aH*0.6)}" rx="${fmt(aW*0.45)}" ry="${fmt(aH*0.35)}" fill="rgba(${st.auraRGB},0.22)" style="animation:auraPulse 1.4s ease-in-out 0.2s infinite;transform-origin:${fmt(cx)}px ${fmt(aY+aH*0.6)}px"/>`;
+
+    // Aura spikes (flame-like upward streaks)
+    const spikeCount = 6 + stage * 2;
+    for (let i = 0; i < spikeCount; i++) {
+      // deterministic positions
+      const seed = (i * 137 + stage * 31) % 100;
+      const xOff = (seed / 100 - 0.5) * aW * 1.4;
+      const sLen = (aH * 0.4 + (seed % 40) * s * 2);
+      const sX   = cx + xOff;
+      const sY   = aY + aH * 0.15 + (seed % 30) * s;
+      const sW   = (6 + seed % 8) * s;
+      const delay = (i * 0.13) % 1.2;
+      out += `<ellipse cx="${fmt(sX)}" cy="${fmt(sY - sLen/2)}" rx="${fmt(sW/2)}" ry="${fmt(sLen/2)}" fill="rgba(${st.auraRGB},0.30)" style="animation:auraPulse ${(1.0+delay).toFixed(1)}s ease-in-out ${delay.toFixed(1)}s infinite;transform-origin:${fmt(sX)}px ${fmt(sY)}px"/>`;
+    }
+
+    // SSJ2+ lightning bolts
+    if (stage >= 3) {
+      const bolts = [[cx-30*s, headCY-20*s], [cx+20*s, headCY-10*s], [cx-10*s, headCY-35*s], [cx+35*s, headCY-25*s]];
+      bolts.forEach(([bx,by], i) => {
+        const delay = (i * 0.17).toFixed(2);
+        out += `<path d="M ${fmt(bx)} ${fmt(by)} L ${fmt(bx-8*s)} ${fmt(by+16*s)} L ${fmt(bx+4*s)} ${fmt(by+16*s)} L ${fmt(bx-4*s)} ${fmt(by+32*s)}"
+          stroke="${stage>=4?'#aaccff':'#ffff88'}" stroke-width="${fmt(2*s)}" fill="none"
+          style="animation:spark 0.5s ease-in-out ${delay}s infinite"/>`;
+      });
+    }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="overflow:visible">
-    ${defs}${bg}${trunkSVG}${branchSVG}${blossomSVG}${emptyLabel}
-  </svg>`;
+  // ── Goku figure — bobbing group ──
+  const bobStyle = total > 0
+    ? `style="animation:gokuBob 2s ease-in-out infinite;transform-origin:${fmt(cx)}px ${fmt(footY)}px"`
+    : '';
+  out += `<g ${bobStyle}>`;
+
+  // Legs
+  [-1, 1].forEach(side => {
+    const lx = cx + side * legW * 0.7;
+    out += `<rect x="${fmt(lx-legW/2)}" y="${fmt(legTopY)}" width="${fmt(legW)}" height="${fmt(legH*0.72)}" rx="${fmt(legW*0.3)}" fill="${GI}"/>`;
+    out += `<rect x="${fmt(lx-legW/2-1.5*s)}" y="${fmt(footY-legH*0.30)}" width="${fmt(legW+3*s)}" height="${fmt(legH*0.33)}" rx="${fmt(legW*0.28)}" fill="${BOOT}"/>`;
+  });
+
+  // Belt
+  const bodyW = 43 * s;
+  out += `<rect x="${fmt(cx-bodyW/2)}" y="${fmt(legTopY-9*s)}" width="${fmt(bodyW)}" height="${fmt(11*s)}" rx="${fmt(4*s)}" fill="${BELT}"/>`;
+
+  // Torso
+  out += `<rect x="${fmt(cx-bodyW/2)}" y="${fmt(bodyTopY)}" width="${fmt(bodyW)}" height="${fmt(bodyH)}" rx="${fmt(8*s)}" fill="${GI}"/>`;
+  // Gi center seam + collar
+  out += `<line x1="${fmt(cx)}" y1="${fmt(bodyTopY+4*s)}" x2="${fmt(cx)}" y2="${fmt(bodyTopY+bodyH*0.42)}" stroke="${BELT}" stroke-width="${fmt(2*s)}" opacity="0.65"/>`;
+  out += `<path d="M ${fmt(cx-9*s)} ${fmt(bodyTopY+5*s)} Q ${fmt(cx)} ${fmt(bodyTopY+19*s)} ${fmt(cx+9*s)} ${fmt(bodyTopY+5*s)}" stroke="${UNDER}" stroke-width="${fmt(3*s)}" fill="none" stroke-linecap="round"/>`;
+
+  // Arms
+  [-1, 1].forEach(side => {
+    const ax = cx + side * (bodyW/2 + armW*0.2);
+    const rot = side * 8;
+    const aTY = bodyTopY + 4*s;
+    const armLen = 52 * s;
+    out += `<rect x="${fmt(ax-armW/2)}" y="${fmt(aTY)}" width="${fmt(armW)}" height="${fmt(armLen*0.78)}" rx="${fmt(armW*0.4)}" fill="${GI}" transform="rotate(${rot},${fmt(ax)},${fmt(aTY)})"/>`;
+    out += `<rect x="${fmt(ax-armW/2-1*s)}" y="${fmt(aTY+armLen*0.50)}" width="${fmt(armW+2*s)}" height="${fmt(6*s)}" rx="${fmt(3*s)}" fill="${BAND}" transform="rotate(${rot},${fmt(ax)},${fmt(aTY)})"/>`;
+    out += `<ellipse cx="${fmt(ax+side*2*s)}" cy="${fmt(aTY+armLen*0.72)}" rx="${fmt(armW*0.58)}" ry="${fmt(armW*0.52)}" fill="${SKIN}" transform="rotate(${rot},${fmt(ax)},${fmt(aTY)})"/>`;
+  });
+
+  // Head
+  out += `<circle cx="${fmt(cx)}" cy="${fmt(headCY)}" r="${fmt(headR)}" fill="${SKIN}"/>`;
+
+  // Eyes
+  out += `<ellipse cx="${fmt(cx-8*s)}" cy="${fmt(headCY-2*s)}" rx="${fmt(4*s)}" ry="${fmt(stage>=1?4.5*s:4*s)}" fill="#fff"/>`;
+  out += `<ellipse cx="${fmt(cx+8*s)}" cy="${fmt(headCY-2*s)}" rx="${fmt(4*s)}" ry="${fmt(stage>=1?4.5*s:4*s)}" fill="#fff"/>`;
+  out += `<circle cx="${fmt(cx-7.5*s)}" cy="${fmt(headCY-1.5*s)}" r="${fmt(2.8*s)}" fill="#111"/>`;
+  out += `<circle cx="${fmt(cx+8.5*s)}" cy="${fmt(headCY-1.5*s)}" r="${fmt(2.8*s)}" fill="#111"/>`;
+  // Intense glow eyes for SSJ+
+  if (stage >= 2) {
+    out += `<ellipse cx="${fmt(cx-7.5*s)}" cy="${fmt(headCY-1.5*s)}" rx="${fmt(4*s)}" ry="${fmt(4.5*s)}" fill="rgba(${st.auraRGB},0.25)"/>`;
+    out += `<ellipse cx="${fmt(cx+8.5*s)}" cy="${fmt(headCY-1.5*s)}" rx="${fmt(4*s)}" ry="${fmt(4.5*s)}" fill="rgba(${st.auraRGB},0.25)"/>`;
+  }
+
+  // Eyebrows (angled more intensely per stage)
+  const browTilt = 2 + stage * 1.5;
+  out += `<path d="M ${fmt(cx-13*s)} ${fmt(headCY-8*s-browTilt*s)} L ${fmt(cx-3*s)} ${fmt(headCY-7*s+browTilt*s*0.5)}" stroke="#1a1a1a" stroke-width="${fmt(2.5*s)}" stroke-linecap="round"/>`;
+  out += `<path d="M ${fmt(cx+3*s)} ${fmt(headCY-7*s+browTilt*s*0.5)} L ${fmt(cx+13*s)} ${fmt(headCY-8*s-browTilt*s)}" stroke="#1a1a1a" stroke-width="${fmt(2.5*s)}" stroke-linecap="round"/>`;
+
+  // Mouth
+  const mouthExpr = stage >= 2 ? `M ${fmt(cx-4*s)} ${fmt(headCY+9*s)} L ${fmt(cx+4*s)} ${fmt(headCY+9*s)}` // stern
+    : `M ${fmt(cx-5*s)} ${fmt(headCY+8*s)} Q ${fmt(cx)} ${fmt(headCY+13*s)} ${fmt(cx+5*s)} ${fmt(headCY+8*s)}`; // smile
+  out += `<path d="${mouthExpr}" stroke="#333" stroke-width="${fmt(2*s)}" fill="none" stroke-linecap="round"/>`;
+
+  // Cheek marks
+  out += `<path d="M ${fmt(cx-14*s)} ${fmt(headCY+4*s)} L ${fmt(cx-9*s)} ${fmt(headCY+6*s)}" stroke="#e09070" stroke-width="${fmt(1.5*s)}" stroke-linecap="round" opacity="0.6"/>`;
+  out += `<path d="M ${fmt(cx+14*s)} ${fmt(headCY+4*s)} L ${fmt(cx+9*s)} ${fmt(headCY+6*s)}" stroke="#e09070" stroke-width="${fmt(1.5*s)}" stroke-linecap="round" opacity="0.6"/>`;
+
+  // Hair — base form vs SSJ
+  const hc = st.hair;
+  const hairBase = headCY - headR * 0.15;
+  if (stage >= 4) {
+    // SSJ3 / SSJBlue — dramatically elongated spikes + flowing back hair
+    out += spike(cx-14*s, hairBase-2*s, 112, headR*3.2*s/s, headR*0.65, hc);
+    out += spike(cx-6*s,  hairBase-6*s, 97,  headR*3.8*s/s, headR*0.58, hc);
+    out += spike(cx+2*s,  hairBase-9*s, 82,  headR*4.2*s/s, headR*0.62, hc);
+    out += spike(cx+10*s, hairBase-6*s, 65,  headR*3.4*s/s, headR*0.56, hc);
+    out += spike(cx+16*s, hairBase-2*s, 46,  headR*2.5*s/s, headR*0.50, hc);
+    out += spike(cx-headR*0.85, hairBase+4*s, 150, headR*1.5*s/s, headR*0.40, hc);
+    out += spike(cx+headR*0.85, hairBase+4*s, 30,  headR*1.2*s/s, headR*0.37, hc);
+    // Long trailing hair down the back (SSJ3 signature)
+    out += `<path d="M ${fmt(cx-headR*0.7)} ${fmt(headCY+headR*0.3)} Q ${fmt(cx-headR*1.8)} ${fmt(headCY+bodyH*0.5)} ${fmt(cx-headR*1.2)} ${fmt(bodyTopY+bodyH*0.8)}" stroke="${hc}" stroke-width="${fmt(headR*0.55)}" fill="none" stroke-linecap="round" opacity="0.85"/>`;
+    out += `<ellipse cx="${fmt(cx+4*s)}" cy="${fmt(hairBase)}" rx="${fmt(headR*0.9)}" ry="${fmt(headR*0.70)}" fill="${hc}"/>`;
+    out += spike(cx-3*s, hairBase-7*s, 88, headR*3.8*s/s, headR*0.20, stage>=5?'#aaccff':'#fffde0');
+  } else if (stage >= 2) {
+    // SSJ / SSJ2 spikes — longer, taller, swept upward
+    out += spike(cx-12*s, hairBase-2*s,  108, headR*2.6*s/s, headR*0.62, hc);
+    out += spike(cx-5*s,  hairBase-5*s,  95,  headR*3.0*s/s, headR*0.55, hc);
+    out += spike(cx+2*s,  hairBase-7*s,  82,  headR*3.2*s/s, headR*0.58, hc);
+    out += spike(cx+9*s,  hairBase-5*s,  65,  headR*2.7*s/s, headR*0.52, hc);
+    out += spike(cx+14*s, hairBase-2*s,  48,  headR*2.0*s/s, headR*0.48, hc);
+    out += spike(cx-headR*0.85, hairBase+4*s, 148, headR*1.2*s/s, headR*0.38, hc);
+    out += spike(cx+headR*0.85, hairBase+4*s, 32,  headR*1.0*s/s, headR*0.35, hc);
+    out += `<ellipse cx="${fmt(cx+4*s)}" cy="${fmt(hairBase)}" rx="${fmt(headR*0.88)}" ry="${fmt(headR*0.68)}" fill="${hc}"/>`;
+    out += spike(cx-3*s, hairBase-6*s, 88, headR*2.8*s/s, headR*0.18, '#fffde0');
+  } else {
+    // Base / Kaioken — tighter spikes
+    out += spike(cx-9*s,  hairBase-2*s, 105, headR*1.7*s/s, headR*0.52, hc);
+    out += spike(cx-1*s,  hairBase-5*s, 90,  headR*2.0*s/s, headR*0.48, hc);
+    out += spike(cx+8*s,  hairBase-3*s, 72,  headR*1.7*s/s, headR*0.48, hc);
+    out += spike(cx+12*s, hairBase,     52,  headR*1.3*s/s, headR*0.42, hc);
+    out += spike(cx-headR*0.85, hairBase+4*s, 145, headR*1.0*s/s, headR*0.32, hc);
+    out += spike(cx+headR*0.85, hairBase+4*s, 35,  headR*0.9*s/s, headR*0.30, hc);
+    out += `<ellipse cx="${fmt(cx+4*s)}" cy="${fmt(hairBase+2*s)}" rx="${fmt(headR*0.88)}" ry="${fmt(headR*0.65)}" fill="${hc}"/>`;
+  }
+
+  out += `</g>`; // end bobbing group
+
+  // ── Stage label ──
+  if (st.label) {
+    out += `<text x="${fmt(W/2)}" y="${fmt(H*0.10)}" text-anchor="middle"
+      font-family="'Bebas Neue',sans-serif" font-size="${fmt(20*s)}" fill="${st.lc}"
+      letter-spacing="0.14em" opacity="0.90">${st.label}</text>`;
+  }
+
+  // ── Power level ──
+  const powerLevel = total === 0 ? 0 : Math.round(total * 18500 * (stage + 1));
+  const plLabel = total === 0 ? 'Start your first session' : `Power level  ${powerLevel.toLocaleString()}`;
+  out += `<text x="${fmt(W/2)}" y="${fmt(H*0.94)}" text-anchor="middle"
+    font-family="'DM Mono',monospace" font-size="${fmt(10*s)}" fill="${total===0?'#3a3050':st.lc}"
+    letter-spacing="0.12em" opacity="${total===0?0.6:0.75}">${plLabel}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="overflow:visible">${out}</svg>`;
 }
 
 function renderTree(animateNew) {
@@ -938,7 +939,7 @@ function renderTree(animateNew) {
   svg.setAttribute('viewBox',`0 0 ${w} ${h}`);
   svg.setAttribute('width','100%');
   svg.setAttribute('height','100%');
-  svg.innerHTML = buildTreeSVG(w, h, animateNew).replace(/^<svg[^>]+>/,'').replace(/<\/svg>$/,'');
+  svg.innerHTML = buildGokuSVG(w, h, animateNew).replace(/^<svg[^>]+>/,'').replace(/<\/svg>$/,'');
   container.insertBefore(svg, petal);
 }
 
